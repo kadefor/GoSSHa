@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
@@ -17,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	flag "github.com/spf13/pflag"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 )
@@ -48,6 +48,7 @@ var (
 	disconnectAfterUse bool   // close connection after each action
 
 	connectedHosts = connHostsMap{v: make(map[string]*ssh.Client)}
+	ENV []string
 )
 
 type connHostsMap struct {
@@ -339,6 +340,20 @@ func getConnection(hostname string) (conn *ssh.Client, err error) {
 	return
 }
 
+func prepareSession(session *ssh.Session) error {
+        for _, env := range ENV {
+                variable := strings.Split(env, "=")
+                if len(variable) != 2 {
+                        continue
+                }
+
+                if err := session.Setenv(variable[0], variable[1]); err != nil {
+                        return err
+                }
+        }
+        return nil
+}
+
 func uploadFile(target string, contents []byte, hostname string) (stdout, stderr string, err error) {
 	conn, err := getConnection(hostname)
 	if err != nil {
@@ -349,6 +364,7 @@ func uploadFile(target string, contents []byte, hostname string) (stdout, stderr
 	if err != nil {
 		return
 	}
+	prepareSession(session)
 	if disconnectAfterUse {
 		defer connectedHosts.Close(hostname)
 	}
@@ -405,6 +421,7 @@ func executeCmd(cmd string, hostname string) (stdout, stderr string, err error) 
 	if err != nil {
 		return
 	}
+	prepareSession(session)
 	if disconnectAfterUse {
 		defer connectedHosts.Close(hostname)
 	}
@@ -450,12 +467,15 @@ func initialize(internalInput bool) {
 		maxAgentConnections uint64
 	)
 
-	flag.StringVar(&pubKey, "i", "", "Optional path to public key to use")
-	flag.StringVar(&user, "l", os.Getenv("LOGNAME"), "Optional login name")
-	flag.Uint64Var(&maxAgentConnections, "c", maxOpensshAgentConnections, "Maximum simultaneous ssh-agent connections")
-	flag.BoolVar(&disconnectAfterUse, "d", false, "Disconnect after each action")
-	flag.Uint64Var(&maxConnections, "m", 0, "Maximum simultaneous connections")
-	flag.Parse()
+        flag.StringVarP(&pubKey, "keyfile", "i", "", "Optional path to ssh keyfile to use")
+        flag.StringVarP(&user, "login", "l", os.Getenv("LOGNAME"), "Optional login name")
+        flag.Uint64VarP(&maxAgentConnections, "concurrency", "c", maxOpensshAgentConnections, "Maximum simultaneous ssh-agent connections")
+        flag.BoolVarP(&disconnectAfterUse, "disconnect", "d", false, "Disconnect after each action")
+        flag.Uint64VarP(&maxConnections, "maxconnections", "m", 0, "Maximum simultaneous connections")
+        flag.StringSliceVarP(&ENV, "env", "e", []string{}, "Maximum simultaneous connections")
+
+        flag.Parse()
+
 
 	keys = []string{os.Getenv("HOME") + "/.ssh/id_rsa", os.Getenv("HOME") + "/.ssh/id_dsa", os.Getenv("HOME") + "/.ssh/id_ecdsa"}
 
